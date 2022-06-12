@@ -1,0 +1,27 @@
+---
+# tasks file for webserver
+
+- name: Install httpd, php & git packages
+  package:
+    name:
+      - "httpd"
+      - "php"
+      - "git"
+    state: present
+
+- name: Deploying Code from GitHub
+  git:
+    repo: "https://github.com/Dadu-Dev/website.git"
+    dest: "/var/www/html/website"
+
+- name: Copying html code
+  template:
+    src: "index.html"
+    dest: "/var/www/html/index.html"
+
+- name: starting httpd service
+  service:
+    name: "httpd"
+    state: started
+
+...

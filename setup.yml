@@ -1,0 +1,165 @@
+---
+# Play - 1
+- name: "Provisioning backend AWS ec2 instances"
+  hosts: localhost
+  gather_facts: no
+  vars_files:
+    - aws_login.yml
+  tasks:
+  - name: Installing boto
+    pip:
+        name: boto
+        state: present
+
+  - name: Installing boto3
+    pip:
+        name: boto3
+        state: present
+
+  - name: "Creating Security Group for backend webserver on AWS"
+    ec2_group:
+        name: WebSG
+        description: "Security Group for Web Server allowing port for http and ssh"
+        region: ap-south-1
+        aws_access_key: "{{ Access_Key }}"
+        aws_secret_key: "{{ Secret_Key }}"
+        rules:
+        - proto: tcp
+          from_port: 22
+          to_port: 22
+          cidr_ip: 0.0.0.0/0
+        - proto: tcp
+          from_port: 80
+          to_port: 80
+          cidr_ip: 0.0.0.0/0
+        rules_egress:
+        - proto: all
+          cidr_ip: 0.0.0.0/0
+
+  - name: launching ec2 instance for webserver
+    ec2:
+        aws_access_key: "{{ Access_Key }}"
+        aws_secret_key: "{{ Secret_Key }}"
+        region: ap-south-1
+        image: ami-0a3277ffce9146b74
+        instance_type: t2.micro
+        vpc_subnet_id: subnet-0da48ff7140f886aa
+        count: 3
+        wait: true
+        group: WebSG
+        assign_public_ip: yes
+        state: present
+        instance_tags:
+          Name: Ansible_WebServer
+        key_name: my_aws
+    register: backend
+
+  - name: Add new instance to host group webserver
+    add_host:
+        hostname: "{{ item.public_ip }}"
+        groupname: webserver
+    loop: "{{ backend.instances }}"
+ 
+  - name: Wait for SSH to come up
+    wait_for:
+        host: "{{ item.public_dns_name }}"
+        port: 22
+        state: started
+    loop: "{{ backend.instances }}"
+
+# Play - 2
+- name: "Configuring backend instances"
+  hosts: Configure webserver instance
+  tasks:
+  roles:
+    - webserver
+
+# Play - 3
+- name: "Provisioning frontend AWS ec2 instance"
+  hosts: localhost
+  gather_facts: no
+  vars_files:
+    - aws_login.yml
+  tasks:
+  - name: "Creating Security Group for frontend loadbalancer server on AWS"
+    ec2_group:
+      name: LBSG
+      description: "Security Group for LB Server allowing port for http and ssh"
+      region: ap-south-1
+      aws_access_key: "{{ Access_Key }}"
+      aws_secret_key: "{{ Secret_Key }}"
+      rules:
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 8080
+        to_port: 8080
+        cidr_ip: 0.0.0.0/0
+      rules_egress:
+      - proto: all
+        cidr_ip: 0.0.0.0/0
+      
+  - name: launching ec2 instance for lbserver
+    ec2:
+      aws_access_key: "{{ Access_Key }}"
+      aws_secret_key: "{{ Secret_Key }}"
+      region: ap-south-1
+      image: ami-0a3277ffce9146b74
+      instance_type: t2.micro
+      vpc_subnet_id: subnet-0da48ff7140f886aa
+      count: 1
+      wait: true
+      group: LBSG
+      assign_public_ip: yes
+      state: present
+      instance_tags:
+        Name: "Ansible_LoadBalancer"
+      key_name: my_aws
+    register: frontend
+    
+  - name: Add new instance to host group lbserver
+    add_host:
+       hostname: "{{ item.public_ip }}"
+       groupname: lbserver
+    loop: "{{ frontend.instances }}"
+
+  - name: Wait for SSH to come up
+    wait_for:
+       host: "{{ item.public_dns_name }}"
+       port: 22
+       state: started
+    loop: "{{ frontend.instances }}"
+  
+# Play - 4
+- name: "Configuring frontend instance"
+  hosts: Configure lbserver instance
+  tasks:
+  roles:
+    - lbserver
+
+# Play - 5
+- hosts: localhost
+  vars_files:
+  - email_login.yml
+  tasks:
+   - name: "Sending e-mail using Gmail SMTP server"
+     community.general.mail:
+       host: smtp.gmail.com
+       port: 587
+       username: "{{ user }}"
+       password: "{{ password }}"
+       to: sdhayath22@gmail.com
+       subject: From DevOps!
+       body: |
+           Congratulations...!
+
+               The entire setup is done successfully :)
+
+               Now, you can visit the website using below attached link :
+               
+               "http://{{ frontend['instances'][0]['public_ip']  }}:8080"
+
+           Thank you!
+...
